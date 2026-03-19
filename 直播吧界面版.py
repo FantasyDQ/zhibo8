@@ -276,7 +276,7 @@ def _fetch_page(sid: str) -> list:
                 timeout=8)
             return r.json()
         except:
-            time.sleep(0.5)
+            time.sleep(0.1)
     return []
 
 # 节次缓存：后台每 10 秒更新一次，不阻塞主轮询链路
@@ -356,12 +356,12 @@ def fetch_live_text():
                 _dispatch_items(items, _period_cache)
                 last_sid = cur_sid
                 root.after(0, update_player_stats)
-                time.sleep(0.5)
+                time.sleep(0.1)
                 continue
 
             if cur_sid == last_sid:
                 # sid 没变，无新内容，短暂等待再试
-                time.sleep(0.5)
+                time.sleep(0.1)
                 continue
 
             # sid 前进了：逐页补全，不丢包
@@ -379,7 +379,7 @@ def fetch_live_text():
             _dispatch_items(all_items, _period_cache)
             last_sid = cur_sid
             root.after(0, update_player_stats)
-            time.sleep(0.5)   # 有新内容后也只等 0.5s 就继续轮询
+            time.sleep(0.1)   # 有新内容后也只等 0.5s 就继续轮询
 
         except:
             time.sleep(2)
