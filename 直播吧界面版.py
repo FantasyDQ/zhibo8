@@ -32,7 +32,7 @@ TTS_VOICES = {
     '云希（男·低沉）': 'zh-CN-YunxiNeural',
     '晓伊（女·活泼）': 'zh-CN-XiaoyiNeural',
 }
-_tts_voice  = 'zh-CN-XiaoxiaoNeural'    # 默认晓晓
+_tts_voice  = 'zh-CN-XiaoxiaoNeural'    # 默认晓伊
 _tts_on     = False
 _tts_queue: _queue.Queue = _queue.Queue(maxsize=6)
 _tts_proc   = None
@@ -305,9 +305,8 @@ def _dispatch_items(items: list, period: str):
 
     for _, item in sorted(new_items, key=lambda x: x[0]):
         txt = item.get('live_text', '')
-        for nm in player_names:
-            pat = r'(?<![^\s，。！？、])' + re.escape(nm) + r'(?![^\s，。！？、])'
-            txt = re.sub(pat, f'@@{nm}@@', txt)
+        for nm in sorted(player_names, key=len, reverse=True):
+            txt = txt.replace(nm, f'@@{nm}@@')
         gs = item.get('guest_score') or item.get('home_score', '0')
         hs = item.get('host_score') or item.get('visit_score', '0')
         root.after(0, lambda t=txt, pd=period, g=gs, h=hs:
