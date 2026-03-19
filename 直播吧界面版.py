@@ -716,9 +716,9 @@ live_text.tag_config('tag_body',
     foreground=TEXT_B, font=('微软雅黑', 12),
     background='#FFFDE7', lmargin1=0, lmargin2=60, spacing1=0, spacing3=0)
 live_text.tag_config('tag_player_guest',
-    foreground='#1565C0', font=('微软雅黑', 12, 'bold'), background='#FFFDE7')   # 客队蓝
+    foreground='#C62828', font=('微软雅黑', 12, 'bold'), background='#FFFDE7')   # 客队红
 live_text.tag_config('tag_player_host',
-    foreground='#C62828', font=('微软雅黑', 12, 'bold'), background='#FFFDE7')   # 主队红
+    foreground='#1565C0', font=('微软雅黑', 12, 'bold'), background='#FFFDE7')   # 主队蓝
 live_text.tag_config('tag_right',
     foreground=TEXT_M, font=('微软雅黑', 10), background='#FFFDE7', spacing3=0)
 live_text.tag_config('div_line',
