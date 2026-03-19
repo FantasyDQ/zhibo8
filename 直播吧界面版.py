@@ -32,7 +32,7 @@ TTS_VOICES = {
     '云希（男·低沉）': 'zh-CN-YunxiNeural',
     '晓伊（女·活泼）': 'zh-CN-XiaoyiNeural',
 }
-_tts_voice  = 'zh-CN-XiaoxiaoNeural'    # 默认晓伊
+_tts_voice  = 'zh-CN-XiaoyiNeural'    # 默认晓伊
 _tts_on     = False
 _tts_queue: _queue.Queue = _queue.Queue(maxsize=6)
 _tts_proc   = None
@@ -194,7 +194,7 @@ def _load_logo(team_name: str) -> 'tk.PhotoImage | None':
 game_id        = ''
 match_date     = ''
 stop_fetching  = False
-player_names   = set()
+player_names: dict = {}   # {球员名: 'guest'|'host'}
 _guest_name    = '客队'
 _host_name     = '主队'
 
@@ -279,12 +279,29 @@ def _fetch_page(sid: str) -> list:
             time.sleep(0.5)
     return []
 
+# 节次缓存：后台每 10 秒更新一次，不阻塞主轮询链路
+_period_cache = '--'
+
+def _period_updater():
+    """后台线程：每 10 秒刷新一次节次，写入缓存。"""
+    global _period_cache
+    while True:
+        try:
+            r = requests.get(
+                f'https://bifen4pc2.qiumibao.com/json/{match_date}/v2/{game_id}.htm',
+                params={'t': str(int(time.time()))},
+                headers={'User-Agent': 'Mozilla/5.0'}, timeout=6)
+            _period_cache = r.json().get('period_cn', '--')
+        except:
+            pass
+        time.sleep(10)
+
 def _get_max_sid() -> 'str | None':
     """获取当前最大 sid，失败返回 None。"""
     try:
         r = requests.get(
             f'https://dingshi4pc.qiumibao.com/livetext/data/cache/livetext/{game_id}/0/max_sid.json',
-            timeout=8)
+            timeout=6)
         return str(r.json()['max_sid'])
     except:
         return None
@@ -305,8 +322,9 @@ def _dispatch_items(items: list, period: str):
 
     for _, item in sorted(new_items, key=lambda x: x[0]):
         txt = item.get('live_text', '')
-        for nm in sorted(player_names, key=len, reverse=True):
-            txt = txt.replace(nm, f'@@{nm}@@')
+        for nm in sorted(player_names.keys(), key=len, reverse=True):
+            side = player_names[nm]   # 'guest' or 'host'
+            txt = txt.replace(nm, f'@@{side}:{nm}@@')
         gs = item.get('guest_score') or item.get('home_score', '0')
         hs = item.get('host_score') or item.get('visit_score', '0')
         root.after(0, lambda t=txt, pd=period, g=gs, h=hs:
@@ -314,55 +332,57 @@ def _dispatch_items(items: list, period: str):
 
 def fetch_live_text():
     global stop_fetching, player_names, _guest_name, _host_name, _seen_livetext_ids
+    global _period_cache
     _guest_name, _host_name = check_match()
     root.after(0, lambda: ui_set_teams(_guest_name, _host_name))
     _seen_livetext_ids.clear()
+    _period_cache = check_time()   # 启动时同步拿一次节次
 
-    last_sid = None   # 上次拉到的最大 sid（字符串）
+    # 启动节次后台更新线程
+    Thread(target=_period_updater, daemon=True).start()
+
+    last_sid = None
 
     while not stop_fetching:
         try:
             cur_sid = _get_max_sid()
             if cur_sid is None:
-                time.sleep(3)
+                time.sleep(1)
                 continue
 
             if last_sid is None:
                 # 首次：只拉当前最新一页，不补历史
-                items  = _fetch_page(cur_sid)
-                period = check_time()
-                _dispatch_items(items, period)
+                items = _fetch_page(cur_sid)
+                _dispatch_items(items, _period_cache)
                 last_sid = cur_sid
                 root.after(0, update_player_stats)
-                time.sleep(2)
+                time.sleep(0.5)
                 continue
 
             if cur_sid == last_sid:
-                # sid 没变，无新内容
-                time.sleep(2)
+                # sid 没变，无新内容，短暂等待再试
+                time.sleep(0.5)
                 continue
 
-            # ── sid 前进了：把 last_sid+1 到 cur_sid 的每页都拉一遍 ──
-            # 防止跨页丢包（两次轮询之间产生了多页新内容）
+            # sid 前进了：逐页补全，不丢包
             try:
                 sid_from = int(last_sid) + 1
                 sid_to   = int(cur_sid)
             except ValueError:
                 sid_from = sid_to = int(cur_sid)
 
-            period = check_time()
             all_items = []
             for sid_i in range(sid_from, sid_to + 1):
                 page = _fetch_page(str(sid_i))
                 all_items.extend(page)
 
-            _dispatch_items(all_items, period)
+            _dispatch_items(all_items, _period_cache)
             last_sid = cur_sid
             root.after(0, update_player_stats)
-            time.sleep(2)
+            time.sleep(0.5)   # 有新内容后也只等 0.5s 就继续轮询
 
         except:
-            time.sleep(3)
+            time.sleep(2)
 
 def update_player_stats():
     global player_names
@@ -380,7 +400,10 @@ def update_player_stats():
         ]:
             nm      = gn if key == 'guest' else hn
             players = d.get(key, {}).get('on', [])
-            player_names.update(p.get('player_name_cn', '') for p in players)
+            for p in players:
+                pname = p.get('player_name_cn', '')
+                if pname:
+                    player_names[pname] = key   # 'guest' 或 'host'
             sp = sorted(players, key=lambda p: (
                 -int(p.get('points', 0)),
                 -int(p.get('off', 0)) - int(p.get('def', 0)),
@@ -463,8 +486,18 @@ def ui_append_live(txt, period, gscore, hscore):
     live_text.insert(POS, f'\t{gscore}-{hscore}  {period}', 'tag_right')
     parts = re.split(r'@@(.*?)@@', txt)
     for j in range(len(parts) - 1, -1, -1):
-        tag = 'tag_player' if j % 2 == 1 else 'tag_body'
-        live_text.insert(POS, parts[j], tag)
+        if j % 2 == 1:
+            # 奇数段是球员标记，格式为 "guest:名字" 或 "host:名字"
+            seg = parts[j]
+            if seg.startswith('guest:'):
+                tag, display = 'tag_player_guest', seg[6:]
+            elif seg.startswith('host:'):
+                tag, display = 'tag_player_host', seg[5:]
+            else:
+                tag, display = 'tag_player_guest', seg
+            live_text.insert(POS, display, tag)
+        else:
+            live_text.insert(POS, parts[j], 'tag_body')
     live_text.insert(POS, '  ⚡  ', 'tag_icon')
 
     live_text.see('1.0')
@@ -639,7 +672,7 @@ btn_tts.pack(side='left', padx=4)
 
 # 音色下拉菜单
 import tkinter.font as _tkfont
-_voice_var = tk.StringVar(value='晓晓（女·温柔）')
+_voice_var = tk.StringVar(value='晓伊（女·活泼）')
 
 def _on_voice_change(*_):
     global _tts_voice
@@ -682,8 +715,10 @@ live_text.tag_config('tag_icon',
 live_text.tag_config('tag_body',
     foreground=TEXT_B, font=('微软雅黑', 12),
     background='#FFFDE7', lmargin1=0, lmargin2=60, spacing1=0, spacing3=0)
-live_text.tag_config('tag_player',
-    foreground='#1565C0', font=('微软雅黑', 12, 'bold'), background='#FFFDE7')
+live_text.tag_config('tag_player_guest',
+    foreground='#1565C0', font=('微软雅黑', 12, 'bold'), background='#FFFDE7')   # 客队蓝
+live_text.tag_config('tag_player_host',
+    foreground='#C62828', font=('微软雅黑', 12, 'bold'), background='#FFFDE7')   # 主队红
 live_text.tag_config('tag_right',
     foreground=TEXT_M, font=('微软雅黑', 10), background='#FFFDE7', spacing3=0)
 live_text.tag_config('div_line',
