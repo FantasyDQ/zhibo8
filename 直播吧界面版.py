@@ -503,7 +503,7 @@ def ui_append_live(txt, period, gscore, hscore):
     live_text.see('1.0')
     live_text.configure(state='disabled')
     # 语音播报（去掉@@标记，只朗读纯文本）
-    _tts_say(re.sub(r'@@', '', txt))
+    _tts_say(re.sub(r'@@(?:guest:|host:)?|@@', '', txt))
 
 
 # ══════════════════════════════════════════════════════
